@@ -1,20 +1,23 @@
 {
   "manifest_version": 3,
   "name": "YouTube Transcript Helper",
-  "version": "1.4.6",
+  "version": "1.4.7",
   "description": "Copies a YouTube transcript and (optionally) saves it with a readable filename that includes (with/no timestamps) and the URL.",
   
   "permissions": [
     "downloads",
     "storage",
     "activeTab",
-    "scripting"
+    "scripting",
+    "contextMenus",
+    "tabs"
   ],
 
   "host_permissions": [
     "https://youtube.com/*",
     "https://*.youtube.com/*",
-    "https://youtu.be/*"
+    "https://youtu.be/*",
+    "https://chat.openai.com/*"
   ],
 
   "action": {
