@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "YouTube Transcript Helper",
+  "name": "YouTube Video Summary Maker Using ChatGPT",
   "version": "1.4.7",
   "description": "Copies a YouTube transcript and (optionally) saves it with a readable filename that includes (with/no timestamps) and the URL.",
   
@@ -30,10 +30,10 @@
   },
 
   "icons": {
-    "16": "youtube_transcript_icons/icon_16x16.png",
-    "32": "youtube_transcript_icons/icon_32x32.png",
-    "48": "youtube_transcript_icons/icon_48x48.png",
-    "128": "youtube_transcript_icons/icon_128x128.png"
+    "16": "youtube_to_chatgpt_icons/icon_16x16.png",
+    "32": "youtube_to_chatgpt_icons/icon_32x32.png",
+    "48": "youtube_to_chatgpt_icons/icon_48x48.png",
+    "128": "youtube_to_chatgpt_icons/icon_128x128.png"
   },
 
   "content_scripts": [

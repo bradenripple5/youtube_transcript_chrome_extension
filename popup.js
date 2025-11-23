@@ -3,6 +3,7 @@ const saveCheckbox = document.getElementById('saveCheckbox');
 const grabBtn = document.getElementById('grabBtn');
 const chatgptBtn = document.getElementById('chatgptBtn');
 const statusEl = document.getElementById('status');
+const PROMPT_PREFIX = 'please summarize:\n';
 
 function setStatus(msg) { statusEl.textContent = msg; }
 
@@ -83,12 +84,13 @@ async function handleTranscriptRequest({ sendToChatGPT }) {
     if (resp.error) throw new Error(resp.error);
     if (!resp.transcript) throw new Error('Could not find a transcript on this video.');
 
-    await navigator.clipboard.writeText(resp.transcript);
+    const promptText = `${PROMPT_PREFIX}${resp.transcript}`;
+    await navigator.clipboard.writeText(promptText);
     const saveResult = await saveTranscriptIfNeeded(saveToDownloads, includeTimestamps, resp.transcript, tab);
 
     if (sendToChatGPT) {
       setStatus('Copied. Opening ChatGPT...');
-      const chatRes = await sendTranscriptToChatGPT(resp.transcript);
+      const chatRes = await sendTranscriptToChatGPT(promptText);
       if (!chatRes?.ok) {
         setStatus('Copied. ChatGPT did not open: ' + (chatRes?.error || 'Unknown error.'));
         return;

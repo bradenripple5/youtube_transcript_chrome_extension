@@ -1,6 +1,7 @@
 // MV3 service worker: shared helpers for downloads, ChatGPT integration and context menu.
 const CHATGPT_URL = 'https://chat.openai.com/';
 const MENU_ID = 'ytTranscriptSendToChatGPT';
+const PROMPT_PREFIX = 'please summarize:\n';
 
 function sanitizeForFilenamePreserveSpaces(s) {
   // Replace only illegal characters on Windows: \ / : * ? " < > | with '-'
@@ -237,7 +238,9 @@ async function handleContextMenuRequest(tab) {
       return;
     }
 
-    await copyTextViaTab(tabId, transcript);
+    const promptText = `${PROMPT_PREFIX}${transcript}`;
+
+    await copyTextViaTab(tabId, promptText);
 
     if (saveToDownloads) {
       try {
@@ -251,7 +254,7 @@ async function handleContextMenuRequest(tab) {
       }
     }
 
-    const openRes = await openChatGPTAndPaste(transcript);
+    const openRes = await openChatGPTAndPaste(promptText);
     if (!openRes.ok) {
       await showInlineMessage(tabId, openRes.error || 'Transcript copied, but ChatGPT did not open.');
     }
