@@ -137,7 +137,7 @@ async function waitForTabComplete(tabId, timeoutMs = 45000) {
 }
 
 async function tryFillChatGPT(tabId, transcript) {
-  for (let attempt = 0; attempt < 12; attempt++) {
+  for (let attempt = 0; attempt < 20; attempt++) {
     const [result] = await chrome.scripting.executeScript({
       target: { tabId },
       func: (text) => {
@@ -147,6 +147,7 @@ async function tryFillChatGPT(tabId, transcript) {
           'form textarea',
           '[contenteditable="true"][data-id="root"]'
         ];
+        let inserted = false;
         for (const selector of candidates) {
           const el = document.querySelector(selector);
           if (!el) continue;
@@ -161,14 +162,25 @@ async function tryFillChatGPT(tabId, transcript) {
           if (el.setSelectionRange) {
             el.setSelectionRange(el.value.length, el.value.length);
           }
-          return { ok: true };
+          inserted = true;
+          break;
         }
-        return { ok: false };
+        if (!inserted) {
+          return { ok: false };
+        }
+        const sendBtn =
+          document.querySelector('button[aria-label*="Send"]') ||
+          document.querySelector('button[data-testid="send-button"]') ||
+          document.querySelector('button[type="submit"]');
+        if (sendBtn && !sendBtn.disabled) {
+          sendBtn.click();
+        }
+        return { ok: true };
       },
       args: [transcript]
     });
     if (result?.result?.ok) return true;
-    await sleep(700);
+    await sleep(400);
   }
   return false;
 }
