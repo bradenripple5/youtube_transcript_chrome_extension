@@ -1,7 +1,8 @@
 // MV3 service worker: shared helpers for downloads, ChatGPT integration and context menu.
-const CHATGPT_URL = 'https://chat.openai.com/';
+const CHATGPT_URL = 'https://chatgpt.com/';
 const MENU_ID = 'ytTranscriptSendToChatGPT';
 const PROMPT_PREFIX = 'please summarize:\n';
+const CHATGPT_ATTACHMENT_PROMPT = 'Please summarize the attached transcript file.';
 
 function sanitizeForFilenamePreserveSpaces(s) {
   // Replace only illegal characters on Windows: \ / : * ? " < > | with '-'
@@ -60,6 +61,21 @@ async function requestTranscriptFromTab(tabId, includeTimestamps) {
       includeTimestamps
     });
     return resp?.transcript || null;
+  }
+}
+
+async function requestPageTextFromTab(tabId) {
+  try {
+    const resp = await chrome.tabs.sendMessage(tabId, {
+      type: 'YT_GET_PAGE_TEXT'
+    });
+    return resp?.pageText || null;
+  } catch {
+    await ensureContentScript(tabId);
+    const resp = await chrome.tabs.sendMessage(tabId, {
+      type: 'YT_GET_PAGE_TEXT'
+    });
+    return resp?.pageText || null;
   }
 }
 
@@ -136,60 +152,60 @@ async function waitForTabComplete(tabId, timeoutMs = 45000) {
   throw new Error('Timed out waiting for ChatGPT to load');
 }
 
+async function ensureChatGPTContentScript(tabId) {
+  try {
+    const ping = await chrome.tabs.sendMessage(tabId, { type: 'CHATGPT_PING' });
+    if (ping?.ok) return;
+  } catch {}
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ['chatgpt_content.js']
+  });
+
+  const ping = await chrome.tabs.sendMessage(tabId, { type: 'CHATGPT_PING' });
+  if (!ping?.ok) throw new Error('ChatGPT helper script is not responding.');
+}
+
 async function tryFillChatGPT(tabId, transcript) {
-  for (let attempt = 0; attempt < 20; attempt++) {
-    const [result] = await chrome.scripting.executeScript({
-      target: { tabId },
-      func: (text) => {
-        const candidates = [
-          'textarea#prompt-textarea',
-          'textarea[data-id="root"]',
-          'form textarea',
-          '[contenteditable="true"][data-id="root"]'
-        ];
-        let inserted = false;
-        for (const selector of candidates) {
-          const el = document.querySelector(selector);
-          if (!el) continue;
-          if ('value' in el) {
-            el.value = text;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-          } else {
-            el.innerText = text;
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-          }
-          el.focus();
-          if (el.setSelectionRange) {
-            el.setSelectionRange(el.value.length, el.value.length);
-          }
-          inserted = true;
-          break;
-        }
-        if (!inserted) {
-          return { ok: false };
-        }
-        const sendBtn =
-          document.querySelector('button[aria-label*="Send"]') ||
-          document.querySelector('button[data-testid="send-button"]') ||
-          document.querySelector('button[type="submit"]');
-        if (sendBtn && !sendBtn.disabled) {
-          sendBtn.click();
-        }
-        return { ok: true };
-      },
-      args: [transcript]
+  try {
+    await ensureChatGPTContentScript(tabId);
+    const resp = await chrome.tabs.sendMessage(tabId, {
+      type: 'CHATGPT_FILL_AND_SUBMIT',
+      text: transcript,
+      timeoutMs: 45000
     });
-    if (result?.result?.ok) return true;
-    await sleep(400);
+    return resp || { ok: false, reason: 'no_response' };
+  } catch (err) {
+    return { ok: false, reason: err?.message || String(err) };
   }
-  return false;
+}
+
+async function tryAttachTranscriptInChatGPT(tabId, transcript, fileName) {
+  try {
+    await ensureChatGPTContentScript(tabId);
+    const resp = await chrome.tabs.sendMessage(tabId, {
+      type: 'CHATGPT_ATTACH_AND_SUBMIT',
+      attachmentText: transcript,
+      fileName,
+      promptText: CHATGPT_ATTACHMENT_PROMPT,
+      timeoutMs: 45000
+    });
+    return resp || { ok: false, reason: 'no_response' };
+  } catch (err) {
+    return { ok: false, reason: err?.message || String(err) };
+  }
 }
 
 async function getOrCreateChatGPTTab() {
   try {
-    const existing = await chrome.tabs.query({ url: 'https://chat.openai.com/*' });
-    if (existing && existing.length) {
-      const first = existing.find(tab => tab && tab.id !== undefined) || existing[0];
+    const existing = await chrome.tabs.query({});
+    const matching = existing.filter(tab => {
+      const url = tab?.url || '';
+      return /^https:\/\/chatgpt\.com\//i.test(url) || /^https:\/\/chat\.openai\.com\//i.test(url);
+    });
+    if (matching.length) {
+      const first = matching.find(tab => tab && tab.id !== undefined) || matching[0];
       if (first.id !== undefined) {
         await chrome.tabs.update(first.id, { active: true, highlighted: true });
         return first;
@@ -229,11 +245,22 @@ async function openChatGPTAndPaste(transcript) {
   } catch {
     // Continue even if loading takes too long; we'll still attempt injection.
   }
-  const inserted = await tryFillChatGPT(chatTab.id, transcript);
-  if (!inserted) {
-    return { ok: false, error: 'Could not insert transcript into ChatGPT. Please paste manually.' };
+
+  const fileName = `youtube-transcript-${Date.now()}.txt`;
+  let insertion;
+  if (transcript.length > 12000) {
+    insertion = await tryAttachTranscriptInChatGPT(chatTab.id, transcript, fileName);
+    if (!insertion?.ok) {
+      insertion = await tryFillChatGPT(chatTab.id, transcript);
+    }
+  } else {
+    insertion = await tryFillChatGPT(chatTab.id, transcript);
   }
-  return { ok: true, tabId: chatTab.id };
+
+  if (!insertion?.ok) {
+    return { ok: false, error: `Could not insert transcript into ChatGPT (${insertion?.reason || 'unknown_failure'}).` };
+  }
+  return { ok: true, tabId: chatTab.id, details: insertion };
 }
 
 async function handleContextMenuRequest(tab) {
@@ -244,9 +271,14 @@ async function handleContextMenuRequest(tab) {
       includeTimestamps: false,
       saveToDownloads: false
     });
-    const transcript = await requestTranscriptFromTab(tabId, !!includeTimestamps);
+    let transcript = await requestTranscriptFromTab(tabId, !!includeTimestamps);
+    let usedPageFallback = false;
     if (!transcript) {
-      await showInlineMessage(tabId, 'Transcript not available for this video.');
+      transcript = await requestPageTextFromTab(tabId);
+      usedPageFallback = !!transcript;
+    }
+    if (!transcript) {
+      await showInlineMessage(tabId, 'Transcript and page text were not available for this video.');
       return;
     }
 
@@ -269,6 +301,8 @@ async function handleContextMenuRequest(tab) {
     const openRes = await openChatGPTAndPaste(promptText);
     if (!openRes.ok) {
       await showInlineMessage(tabId, openRes.error || 'Transcript copied, but ChatGPT did not open.');
+    } else if (usedPageFallback) {
+      await showInlineMessage(tabId, 'Transcript unavailable. Sent full page text to ChatGPT instead.');
     }
   } catch (err) {
     await showInlineMessage(tabId, `Transcript helper error: ${err?.message || err}`);
