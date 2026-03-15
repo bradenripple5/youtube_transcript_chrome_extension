@@ -347,6 +347,27 @@ function humanClick(target) {
     return header.concat(deduped).join('\n').trim();
   }
 
+  async function waitForTranscriptDomToStabilize(includeTimestamps, maxAttempts = 30, intervalMs = 300) {
+    let bestText = '';
+    let stableReads = 0;
+
+    for (let i = 0; i < maxAttempts; i++) {
+      const currentText = scrapeTranscriptFromDOM(includeTimestamps) || '';
+
+      if (currentText.length > bestText.length) {
+        bestText = currentText;
+        stableReads = 0;
+      } else if (currentText && currentText === bestText) {
+        stableReads += 1;
+        if (stableReads >= 3) return currentText;
+      }
+
+      await sleep(intervalMs);
+    }
+
+    return bestText || null;
+  }
+
   async function ensureTranscriptPanelOpen() {
     // Already have segments? Then we’re good.
     if (hasTranscriptDomContent()) return true;
@@ -463,12 +484,7 @@ function humanClick(target) {
     if (isShortsPage()) return null;
 
     await ensureTranscriptPanelOpen();
-    for (let i=0;i<15;i++) {
-      const domText = scrapeTranscriptFromDOM(includeTimestamps);
-      if (domText) return domText;
-      await sleep(200);
-    }
-    return null;
+    return await waitForTranscriptDomToStabilize(includeTimestamps);
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
