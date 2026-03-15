@@ -2,6 +2,9 @@
 
 This Chrome extension copies the YouTube transcript for the current video and (optionally) saves it with a readable filename that can include timestamps and the URL for easy reference.
 
+Chrome Web Store:
+https://chromewebstore.google.com/detail/kimkjclgpbdmoggbladinbcfnpnelahp
+
 ## Site access screenshot
 
 ![Chrome extensions permissions screenshot](Screenshot%20from%202025-11-23%2016-07-02.png)

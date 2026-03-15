@@ -3,6 +3,7 @@
   "name": "YouTube Video Summary Maker Using ChatGPT",
   "version": "1.4.8",
   "description": "Copies a YouTube transcript and (optionally) saves it with a readable filename that includes (with/no timestamps) and the URL.",
+  "homepage_url": "https://chromewebstore.google.com/detail/kimkjclgpbdmoggbladinbcfnpnelahp",
   
   "permissions": [
     "downloads",
