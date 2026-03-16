@@ -79,6 +79,32 @@ function humanClick(target) {
     return dedup.join('\n');
   }
 
+  function isMeaningfulTranscriptText(text) {
+    if (!text) return false;
+
+    const lines = text
+      .split('\n')
+      .map(line => line.trim())
+      .filter(Boolean);
+    if (!lines.length) return false;
+
+    const contentLines = lines
+      .filter(line => !/^\[\d{2}:\d{2}(?::\d{2})?\]$/.test(line))
+      .map(line => line.replace(/\[\d{2}:\d{2}(?::\d{2})?\]\s*/g, '').trim())
+      .filter(Boolean);
+    if (!contentLines.length) return false;
+
+    const joined = contentLines.join(' ');
+    if (joined.length < 24) return false;
+
+    const alphaNumChars = joined.replace(/[^A-Za-z0-9]/g, '');
+    if (alphaNumChars.length < 12) return false;
+
+    if (contentLines.length < 2 && joined.length < 80) return false;
+
+    return true;
+  }
+
   function getPlayerResponseCandidates() {
     const candidates = [];
 
@@ -117,14 +143,67 @@ function humanClick(target) {
     return candidates;
   }
 
-  function getCaptionTrackCandidates() {
+  function getCurrentVideoIdFromUrl() {
+    try {
+      const url = new URL(location.href);
+      const watchId = url.searchParams.get('v');
+      if (watchId) return watchId;
+
+      const parts = (url.pathname || '').split('/').filter(Boolean);
+      if (parts[0] === 'shorts' && parts[1]) return parts[1];
+      if (parts.length === 1 && /youtu\.be$/i.test(url.hostname) && parts[0]) return parts[0];
+    } catch {}
+    return '';
+  }
+
+  function getVideoIdFromPlayerResponse(pr) {
+    return (
+      pr?.videoDetails?.videoId ||
+      pr?.currentVideoEndpoint?.watchEndpoint?.videoId ||
+      ''
+    );
+  }
+
+  async function waitForPlayerResponseForVideo(videoId, timeoutMs = 7000) {
+    if (!videoId) return;
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const hasMatch = getPlayerResponseCandidates().some(
+        pr =>
+          getVideoIdFromPlayerResponse(pr) === videoId &&
+          Array.isArray(pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks) &&
+          pr.captions.playerCaptionsTracklistRenderer.captionTracks.length > 0
+      );
+      if (hasMatch) return;
+      await sleep(200);
+    }
+  }
+
+  function getCaptionTrackCandidates(currentVideoId) {
+    const matched = [];
+    const fallback = [];
+    const seen = new Set();
+
     for (const pr of getPlayerResponseCandidates()) {
       const tracks = pr?.captions?.playerCaptionsTracklistRenderer?.captionTracks;
-      if (Array.isArray(tracks) && tracks.length) {
-        return tracks;
+      if (!Array.isArray(tracks) || !tracks.length) continue;
+
+      const responseVideoId = getVideoIdFromPlayerResponse(pr);
+      const preferredBucket =
+        currentVideoId && responseVideoId === currentVideoId ? matched : fallback;
+
+      for (const track of tracks) {
+        const key =
+          track?.baseUrl ||
+          `${track?.vssId || ''}|${track?.languageCode || ''}|${track?.name?.simpleText || ''}`;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        preferredBucket.push(track);
       }
     }
-    return [];
+
+    if (currentVideoId) return matched;
+    return matched.length ? matched : fallback;
   }
 
   function isShortsPage() {
@@ -133,7 +212,9 @@ function humanClick(target) {
 
   async function getTranscriptFromCaptionsAPI(includeTimestamps) {
     try {
-      const tracks = getCaptionTrackCandidates();
+      const currentVideoId = getCurrentVideoIdFromUrl();
+      await waitForPlayerResponseForVideo(currentVideoId, 7000);
+      const tracks = getCaptionTrackCandidates(currentVideoId);
       for (const track of tracks) {
         const baseUrl = track?.baseUrl;
         if (!baseUrl) continue;
@@ -142,7 +223,7 @@ function humanClick(target) {
         if (!res.ok) continue;
         const vtt = await res.text();
         const parsed = parseVtt(vtt, includeTimestamps);
-        if (parsed) return parsed;
+        if (isMeaningfulTranscriptText(parsed)) return parsed;
       }
       return null;
     } catch { return null; }
@@ -163,7 +244,7 @@ function humanClick(target) {
         const raw = el.innerText || el.textContent || '';
         const m = raw.match(/^(\d{1,2}:)?\d{1,2}:\d{2}/);
         const textOnly = raw.replace(/^(\d{1,2}:)?\d{1,2}:\d{2}\s*/,'').trim();
-        if (textOnly) {
+        if (textOnly && /[A-Za-z0-9]/.test(textOnly)) {
           if (includeTimestamps && m) {
             out.push(`[${m[0].length === 4 ? '00:' + m[0] : m[0]}]`);
             out.push(textOnly);
@@ -172,7 +253,10 @@ function humanClick(target) {
           }
         }
       });
-      if (out.length) return out.join('\n');
+      if (out.length) {
+        const candidate = out.join('\n');
+        if (isMeaningfulTranscriptText(candidate)) return candidate;
+      }
     }
 
     const modernTranscriptContainers = document.querySelectorAll(
@@ -196,6 +280,7 @@ function humanClick(target) {
         const timestamp = m[0];
         const textOnly = normalized.replace(/(\d{1,2}:)?\d{1,2}:\d{2}/, '').trim();
         if (!textOnly) return;
+        if (!/[A-Za-z0-9]/.test(textOnly)) return;
 
         // Skip chapter titles and other non-transcript panel items.
         if (/^chapter\s+\d+:/i.test(textOnly)) return;
@@ -256,7 +341,10 @@ function humanClick(target) {
         });
       });
 
-      if (out.length) return out.join('\n');
+      if (out.length) {
+        const candidate = out.join('\n');
+        if (isMeaningfulTranscriptText(candidate)) return candidate;
+      }
     }
 
     const modernTextNodes = document.querySelectorAll(
@@ -277,7 +365,7 @@ function humanClick(target) {
         for (const line of lines) {
           const m = line.match(/^(\d{1,2}:)?\d{1,2}:\d{2}/);
           const textOnly = line.replace(/^(\d{1,2}:)?\d{1,2}:\d{2}\s*/, '').trim();
-          if (!textOnly) continue;
+          if (!textOnly || !/[A-Za-z0-9]/.test(textOnly)) continue;
           if (includeTimestamps && m) {
             out.push(`[${m[0].length === 4 ? '00:' + m[0] : m[0]}]`);
             out.push(textOnly);
@@ -286,7 +374,10 @@ function humanClick(target) {
           }
         }
       });
-      if (out.length) return out.join('\n');
+      if (out.length) {
+        const candidate = out.join('\n');
+        if (isMeaningfulTranscriptText(candidate)) return candidate;
+      }
     }
 
     const legacy = document.querySelectorAll('ytd-transcript-segment-list-renderer .segment, yt-formatted-string.ytd-transcript-segment-renderer');
@@ -296,7 +387,7 @@ function humanClick(target) {
         const raw = el.innerText || el.textContent || '';
         const m = raw.match(/^(\d{1,2}:)?\d{1,2}:\d{2}/);
         const textOnly = raw.replace(/^(\d{1,2}:)?\d{1,2}:\d{2}\s*/,'').trim();
-        if (textOnly) {
+        if (textOnly && /[A-Za-z0-9]/.test(textOnly)) {
           if (includeTimestamps && m) {
             out.push(`[${m[0].length === 4 ? '00:' + m[0] : m[0]}]`);
             out.push(textOnly);
@@ -305,7 +396,10 @@ function humanClick(target) {
           }
         }
       });
-      if (out.length) return out.join('\n');
+      if (out.length) {
+        const candidate = out.join('\n');
+        if (isMeaningfulTranscriptText(candidate)) return candidate;
+      }
     }
     return null;
   }
@@ -478,13 +572,14 @@ function humanClick(target) {
 
   async function getTranscriptTextWithOpen(includeTimestamps) {
     const apiText = await getTranscriptFromCaptionsAPI(includeTimestamps);
-    if (apiText) return apiText;
+    if (isMeaningfulTranscriptText(apiText)) return apiText;
 
     // Shorts generally do not expose the same transcript panel structure as watch pages.
     if (isShortsPage()) return null;
 
     await ensureTranscriptPanelOpen();
-    return await waitForTranscriptDomToStabilize(includeTimestamps);
+    const domText = await waitForTranscriptDomToStabilize(includeTimestamps);
+    return isMeaningfulTranscriptText(domText) ? domText : null;
   }
 
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {

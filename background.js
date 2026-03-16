@@ -227,8 +227,13 @@ async function getOrCreateChatGPTTab() {
   });
 }
 
-async function openChatGPTAndPaste(transcript) {
-  if (!transcript) return { ok: false, error: 'Transcript text is empty.' };
+async function openChatGPTAndPaste({ transcriptText, promptText }) {
+  const attachmentText = transcriptText || '';
+  const messageText = promptText || (attachmentText ? `${PROMPT_PREFIX}${attachmentText}` : '');
+  if (!attachmentText && !messageText) {
+    return { ok: false, error: 'Transcript text is empty.' };
+  }
+
   let chatTab;
   try {
     chatTab = await getOrCreateChatGPTTab();
@@ -246,15 +251,15 @@ async function openChatGPTAndPaste(transcript) {
     // Continue even if loading takes too long; we'll still attempt injection.
   }
 
-  const fileName = `youtube-transcript-${Date.now()}.txt`;
-  let insertion;
-  if (transcript.length > 12000) {
-    insertion = await tryAttachTranscriptInChatGPT(chatTab.id, transcript, fileName);
-    if (!insertion?.ok) {
-      insertion = await tryFillChatGPT(chatTab.id, transcript);
-    }
-  } else {
-    insertion = await tryFillChatGPT(chatTab.id, transcript);
+  const fileName = 'transcript.txt';
+  let insertion = null;
+
+  if (attachmentText) {
+    insertion = await tryAttachTranscriptInChatGPT(chatTab.id, attachmentText, fileName);
+  }
+
+  if (!insertion?.ok) {
+    insertion = await tryFillChatGPT(chatTab.id, messageText);
   }
 
   if (!insertion?.ok) {
@@ -298,7 +303,10 @@ async function handleContextMenuRequest(tab) {
       }
     }
 
-    const openRes = await openChatGPTAndPaste(promptText);
+    const openRes = await openChatGPTAndPaste({
+      transcriptText: transcript,
+      promptText
+    });
     if (!openRes.ok) {
       await showInlineMessage(tabId, openRes.error || 'Transcript copied, but ChatGPT did not open.');
     } else if (usedPageFallback) {
@@ -347,7 +355,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       return;
     }
     if (msg?.type === 'openChatGPTWithTranscript') {
-      const resp = await openChatGPTAndPaste(msg.transcript || '');
+      const resp = await openChatGPTAndPaste({
+        transcriptText: msg.transcript || '',
+        promptText: msg.promptText || ''
+      });
       sendResponse(resp);
       return;
     }

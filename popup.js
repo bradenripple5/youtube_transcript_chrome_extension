@@ -78,10 +78,11 @@ async function saveTranscriptIfNeeded(saveToDownloads, includeTimestamps, transc
   return { saved: true, ok: !!(dl && dl.ok), error: dl?.error };
 }
 
-async function sendTranscriptToChatGPT(transcript) {
+async function sendTranscriptToChatGPT({ transcript, promptText }) {
   const resp = await chrome.runtime.sendMessage({
     type: 'openChatGPTWithTranscript',
-    transcript
+    transcript,
+    promptText
   });
   return resp;
 }
@@ -114,7 +115,10 @@ async function handleTranscriptRequest({ sendToChatGPT }) {
 
     if (sendToChatGPT) {
       setStatus(usedPageFallback ? 'Using full page text. Opening ChatGPT...' : 'Copied. Opening ChatGPT...');
-      const chatRes = await sendTranscriptToChatGPT(promptText);
+      const chatRes = await sendTranscriptToChatGPT({
+        transcript: sourceText,
+        promptText
+      });
       if (!chatRes?.ok) {
         setStatus((usedPageFallback ? 'Used full page text. ' : 'Copied. ') + 'ChatGPT did not open: ' + (chatRes?.error || 'Unknown error.'));
         return;
