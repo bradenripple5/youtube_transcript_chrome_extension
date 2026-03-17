@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "YouTube Video Summary Maker Using ChatGPT",
-  "version": "1.5.1",
+  "version": "1.5.2",
   "description": "Copy YouTube transcripts, send to ChatGPT, and optionally save files with timestamps and source video URL.",
   "homepage_url": "https://chromewebstore.google.com/detail/youtube-video-summary-mak/kimkjclgpbdmoggbladinbcfnpnelahp",
   

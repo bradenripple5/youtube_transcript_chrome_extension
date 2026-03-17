@@ -197,24 +197,7 @@ async function tryAttachTranscriptInChatGPT(tabId, transcript, fileName) {
   }
 }
 
-async function getOrCreateChatGPTTab() {
-  try {
-    const existing = await chrome.tabs.query({});
-    const matching = existing.filter(tab => {
-      const url = tab?.url || '';
-      return /^https:\/\/chatgpt\.com\//i.test(url) || /^https:\/\/chat\.openai\.com\//i.test(url);
-    });
-    if (matching.length) {
-      const first = matching.find(tab => tab && tab.id !== undefined) || matching[0];
-      if (first.id !== undefined) {
-        await chrome.tabs.update(first.id, { active: true, highlighted: true });
-        return first;
-      }
-    }
-  } catch {
-    // Ignore query failures and fall back to creation.
-  }
-
+async function createNewChatGPTTab() {
   return await new Promise((resolve, reject) => {
     chrome.tabs.create({ url: CHATGPT_URL, active: true }, (tab) => {
       const err = chrome.runtime.lastError;
@@ -236,7 +219,7 @@ async function openChatGPTAndPaste({ transcriptText, promptText }) {
 
   let chatTab;
   try {
-    chatTab = await getOrCreateChatGPTTab();
+    chatTab = await createNewChatGPTTab();
   } catch (err) {
     return { ok: false, error: err?.message || 'Unable to open ChatGPT tab.' };
   }
